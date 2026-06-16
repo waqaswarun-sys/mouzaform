@@ -193,14 +193,9 @@
         <div class="field">
           <label>Status</label>
           <select id="status-global">
+            <option value="" selected>-- Select --</option>
             <option value="Complete">Complete</option>
-            <option value="Incomplete">Incomplete</option>
-            <option value="In Progress">In Progress</option>
           </select>
-        </div>
-        <div class="field">
-          <label>Remarks (optional)</label>
-          <input type="text" id="global-remarks" placeholder="Koi general note..."/>
         </div>
       </div>
     </div>
@@ -314,8 +309,8 @@ function onOperatorInput(){
 
 function addRow(data){
   var id = ++rowId;
-  var d = data || {mouza:'',year:'',rhz:0,rhzP:0,mut:0,mutP:0,shj:0,shjP:0,remarks:''};
-  rows.push({id:id,mouza:d.mouza,year:d.year,rhz:d.rhz,rhzP:d.rhzP,mut:d.mut,mutP:d.mutP,shj:d.shj,shjP:d.shjP,remarks:d.remarks});
+  var d = data || {mouza:'',year:'',rhz:0,rhzP:0,mut:0,mutP:0,shj:0,shjP:0};
+  rows.push({id:id,mouza:d.mouza,year:d.year,rhz:d.rhz,rhzP:d.rhzP,mut:d.mut,mutP:d.mutP,shj:d.shj,shjP:d.shjP});
   renderRows();
   updateSummary();
   // Scroll to new entry
@@ -328,7 +323,7 @@ function addRow(data){
 function duplicateLast(){
   if(rows.length === 0){ addRow(); return; }
   var last = rows[rows.length-1];
-  addRow({mouza:last.mouza,year:'',rhz:last.rhz,rhzP:0,mut:last.mut,mutP:0,shj:last.shj,shjP:0,remarks:''});
+  addRow({mouza:last.mouza,year:'',rhz:last.rhz,rhzP:0,mut:last.mut,mutP:0,shj:last.shj,shjP:0});
 }
 
 function removeRow(id){
@@ -394,7 +389,6 @@ function renderRows(){
           +'</div>'
         +'</div>'
       +'</div>'
-      +'<div class="field" style="margin-top:8px"><label>Remarks</label><input type="text" value="'+escHtml(r.remarks||'')+'" oninput="updateField('+r.id+',\'remarks\',this.value)" placeholder="Koi note..."/></div>'
     +'</div>';
   }).join('');
 }
@@ -449,14 +443,13 @@ function buildPayload(){
   var sheet = document.getElementById('sheet-name').value;
   var status = document.getElementById('status-global').value;
   var date = document.getElementById('entry-date').value;
-  var remarks = document.getElementById('global-remarks').value;
   if(!op) return {err:'Operator ka naam likhen'};
   if(!sheet) return {err:'Tehsil/Sheet chunen'};
   if(rows.length===0) return {err:'Kam az kam ek entry daalein'};
   var bad = rows.find(function(r){return !r.mouza||!r.year;});
   if(bad) return {err:'Har entry mein Mouza naam aur Year zaroori hai'};
   return {ok:true, payload:{
-    operator:op, sheet:sheet, status:status, date:date, remarks:remarks,
+    operator:op, sheet:sheet, status:status, date:date,
     entries: rows.map(function(r){
       return {
         mouza:r.mouza, year:r.year,
@@ -464,8 +457,7 @@ function buildPayload(){
         mutation:+r.mut||0, mutationPages:+r.mutP||0,
         shajra:+r.shj||0, shajraPages:+r.shjP||0,
         totalRegisters:(+r.rhz||0)+(+r.mut||0)+(+r.shj||0),
-        totalPages:(+r.rhzP||0)+(+r.mutP||0)+(+r.shjP||0),
-        remarks:r.remarks||''
+        totalPages:(+r.rhzP||0)+(+r.mutP||0)+(+r.shjP||0)
       };
     })
   }};
@@ -525,7 +517,6 @@ function clearAll(){
   rows=[];rowId=0;
   document.getElementById('operator-name').value='';
   document.getElementById('sheet-name').value='';
-  document.getElementById('global-remarks').value='';
   document.getElementById('entry-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('header-op').textContent='';
   renderRows();updateSummary();
