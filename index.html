@@ -61,8 +61,8 @@
     font-size:14px;font-family:inherit;color:var(--text);background:#fff;
     transition:border-color .15s,box-shadow .15s;appearance:none;
   }
-  .field input:focus,.field select:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(29,158,117,.12)}
-  .field input::placeholder{color:var(--text-hint)}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(29,158,117,.12)}
+  .field input::placeholder,.field textarea::placeholder{color:var(--text-hint)}
   .field select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B6B65' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
   
   /* BUTTONS */
@@ -162,42 +162,34 @@
 
   <!-- connection status indicator (shown in header) -->
 
-  <!-- OPERATOR INFO -->
+  <!-- IMPORT FROM SCAN REPORT -->
   <div class="card">
     <div class="card-header">
-      <div class="card-icon icon-green">👤</div>
-      <h2>Operator &amp; Tehsil</h2>
+      <div class="card-icon icon-blue">📥</div>
+      <h2>Scan Report Se Import Karen</h2>
     </div>
     <div class="card-body">
-      <div class="form-row col3">
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+        Folder Scanner se mili .txt report yahan paste karen, ya file upload karen — operator, tehsil aur saari entries khud ban jayengi.
+      </p>
+      <div class="form-row col2" style="margin-bottom:10px">
         <div class="field">
-          <label>Operator ka Naam *</label>
-          <input type="text" id="operator-name" placeholder="Maslan: Ali Hassan" oninput="onOperatorInput()"/>
+          <label>📋 Report Text Paste Karen</label>
+          <textarea id="import-text" rows="6" placeholder="Land Records Folder Scanner — Report ka pura text yahan paste karen..." style="font-family:'Consolas',monospace;font-size:12px;resize:vertical"></textarea>
         </div>
         <div class="field">
-          <label>Tehsil / Sheet *</label>
-          <select id="sheet-name" onchange="updateSummary()">
-            <option value="">-- Sheet chunen --</option>
-            <option value="ملتان سٹی">ملتان سٹی</option>
-            <option value="ملتان صدر">ملتان صدر</option>
-            <option value="شجاع آباد">شجاع آباد</option>
-            <option value="جلالپور پیر والا">جلالپور پیر والا</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Date</label>
-          <input type="date" id="entry-date"/>
+          <label>📁 Ya .txt File(s) Upload Karen</label>
+          <input type="file" id="import-file" accept=".txt" multiple style="padding:7px 10px"/>
+          <div id="import-file-name" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
         </div>
       </div>
-      <div class="form-row col2">
-        <div class="field">
-          <label>Status</label>
-          <select id="status-global">
-            <option value="" selected>-- Select --</option>
-            <option value="Complete">Complete</option>
-          </select>
-        </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="parseImport()">⚡ Parse &amp; Auto-Fill Karen</button>
+        <button class="btn btn-sm" onclick="clearImport()">Clear</button>
+        <div class="spacer"></div>
+        <span id="import-status" style="font-size:12px;color:var(--text-muted)"></span>
       </div>
+      <div id="import-alert" class="alert"></div>
     </div>
   </div>
 
@@ -263,6 +255,7 @@
               <th>Status</th>
               <th>Date</th>
               <th>Operator</th>
+              <th>Tehsil</th>
             </tr>
           </thead>
           <tbody id="preview-body"></tbody>
@@ -297,23 +290,172 @@
 <script>
 var rows = [];
 var rowId = 0;
+var TEHSIL_OPTIONS = ['ملتان سٹی','ملتان صدر','شجاع آباد','جلالپور پیر والا'];
+var today = new Date().toISOString().split('T')[0];
 
-// Set today's date
-document.getElementById('entry-date').value = new Date().toISOString().split('T')[0];
+// ── File upload (multiple) → combine into textarea ──
+document.getElementById('import-file').addEventListener('change', function(e){
+  var files = Array.from(e.target.files || []);
+  if(!files.length) return;
 
-function onOperatorInput(){
-  var op = document.getElementById('operator-name').value;
-  document.getElementById('header-op').textContent = op ? '👤 ' + op : '';
+  document.getElementById('import-file-name').textContent = '⏳ Loading ' + files.length + ' file(s)...';
+
+  var readers = files.map(function(file){
+    return new Promise(function(resolve){
+      var reader = new FileReader();
+      reader.onload = function(ev){ resolve(ev.target.result); };
+      reader.onerror = function(){ resolve(''); };
+      reader.readAsText(file, 'UTF-8');
+    });
+  });
+
+  Promise.all(readers).then(function(contents){
+    var combined = contents.filter(Boolean).join('\n\n');
+    document.getElementById('import-text').value = combined;
+    document.getElementById('import-file-name').textContent =
+      '✓ ' + files.length + ' file' + (files.length>1?'s':'') + ' loaded: ' + files.map(function(f){return f.name;}).join(', ');
+  });
+});
+
+// ── Tehsil name matcher: scan report ka tehsil naam → dropdown ki value ──
+function matchTehsil(tehsilRaw){
+  if(!tehsilRaw) return '';
+  var t = tehsilRaw.toLowerCase();
+  var map = {
+    'city'    : 'ملتان سٹی',
+    'sadar'   : 'ملتان صدر',
+    'saddar'  : 'ملتان صدر',
+    'shujabad': 'شجاع آباد',
+    'shuja'   : 'شجاع آباد',
+    'jalalpur': 'جلالپور پیر والا',
+    'pirwala' : 'جلالپور پیر والا'
+  };
+  for(var key in map){
+    if(t.indexOf(key) !== -1) return map[key];
+  }
+  return '';
+}
+
+// ── Convert "17-06-2026" or "17-05-26" → yyyy-mm-dd for <input type=date> ──
+function normalizeDate(d){
+  if(!d) return '';
+  var m = d.match(/^(\d{2})-(\d{2})-(\d{2,4})$/);
+  if(!m) return '';
+  var dd = m[1], mm = m[2], yy = m[3];
+  if(yy.length === 2) yy = (parseInt(yy,10) > 50 ? '19' : '20') + yy;
+  return yy + '-' + mm + '-' + dd;
+}
+
+// ── Parse scanner report text into structured records (multi-operator aware) ──
+function parseScanReport(text){
+  var records = [];
+  var blocks = text.split(/Record\s*#\s*\d+/i).slice(1);
+  if(blocks.length === 0) return {records:[]};
+
+  blocks.forEach(function(block){
+    var rec = {mouza:'', year:'', tehsil:'', date:'', operator:'', rhz:0, rhzPages:0, mut:0, mutPages:0, shj:0, shjPages:0};
+
+    var dateM = block.match(/Date\s*:\s*(.+)/i);
+    var opM   = block.match(/Operator\s*:\s*(.+)/i);
+    var distM = block.match(/District\s*:\s*(.+)/i);
+    var tehM  = block.match(/Tehsil\s*:\s*(.+)/i);
+    var qanM  = block.match(/Qanongoi\s*:\s*(.+)/i);
+    var patM  = block.match(/Patwar\s*:\s*(.+)/i);
+    var mouM  = block.match(/Mouza\s*:\s*(.+)/i);
+    var yearM = block.match(/Year\s*:\s*(.+)/i);
+
+    if(dateM) rec.date = dateM[1].trim();
+    if(opM) rec.operator = opM[1].trim();
+    if(distM) rec.district = distM[1].trim();
+    if(tehM) rec.tehsil = tehM[1].trim();
+    if(qanM) rec.qanongoi = qanM[1].trim();
+    if(patM) rec.patwar = patM[1].trim();
+    if(mouM) rec.mouza = mouM[1].trim();
+    if(yearM){
+      var yr = yearM[1].trim();
+      var yrMatch = yr.match(/(\d{4}\s*-\s*\d{4}|\d{4})/);
+      rec.year = yrMatch ? yrMatch[1].replace(/\s+/g,'') : yr;
+    }
+
+    var rhzM = block.match(/RHZ\s*\((\d+)\s*volumes?\s*\|\s*(\d+)\s*files?\)/i);
+    var mutM = block.match(/Mutation\s*\((\d+)\s*volumes?\s*\|\s*(\d+)\s*files?\)/i);
+    var shjM = block.match(/Shajra\s*\((\d+)\s*volumes?\s*\|\s*(\d+)\s*files?\)/i);
+
+    if(rhzM){ rec.rhz = parseInt(rhzM[1],10); rec.rhzPages = parseInt(rhzM[2],10); }
+    if(mutM){ rec.mut = parseInt(mutM[1],10); rec.mutPages = parseInt(mutM[2],10); }
+    if(shjM){ rec.shj = parseInt(shjM[1],10); rec.shjPages = parseInt(shjM[2],10); }
+
+    if(rec.mouza || rec.year){
+      records.push(rec);
+    }
+  });
+
+  return {records: records};
+}
+
+function parseImport(){
+  var text = document.getElementById('import-text').value.trim();
+  if(!text){
+    showAlert('import-alert','Pehle text paste karen ya file upload karen','err');
+    return;
+  }
+
+  var result = parseScanReport(text);
+  if(result.records.length === 0){
+    showAlert('import-alert','Koi record nahi mila — report format check karen','err');
+    return;
+  }
+
+  var operatorsSeen = {};
+  result.records.forEach(function(rec){
+    var nd = normalizeDate(rec.date) || today;
+    var matchedTehsil = matchTehsil(rec.tehsil);
+    addRow({
+      operator: rec.operator || '',
+      sheet: matchedTehsil,
+      date: nd,
+      status: 'Complete',
+      mouza: rec.mouza,
+      year: rec.year,
+      rhz: rec.rhz, rhzP: rec.rhzPages,
+      mut: rec.mut, mutP: rec.mutPages,
+      shj: rec.shj, shjP: rec.shjPages
+    });
+    if(rec.operator) operatorsSeen[rec.operator] = true;
+  });
+
+  var opCount = Object.keys(operatorsSeen).length;
+  var opMsg = opCount > 1 ? (' — ' + opCount + ' alag operators detect huay') : '';
+  document.getElementById('import-status').textContent = '✓ ' + result.records.length + ' entries add ho gayin';
+  showAlert('import-alert','✅ '+result.records.length+' mouza entries successfully import ho gayin'+opMsg+'. Neeche har entry mein operator/tehsil check kar lein.','ok');
   updateSummary();
+}
+
+function clearImport(){
+  document.getElementById('import-text').value = '';
+  document.getElementById('import-file').value = '';
+  document.getElementById('import-file-name').textContent = '';
+  document.getElementById('import-status').textContent = '';
+  document.getElementById('import-alert').style.display = 'none';
 }
 
 function addRow(data){
   var id = ++rowId;
-  var d = data || {mouza:'',year:'',rhz:0,rhzP:0,mut:0,mutP:0,shj:0,shjP:0};
-  rows.push({id:id,mouza:d.mouza,year:d.year,rhz:d.rhz,rhzP:d.rhzP,mut:d.mut,mutP:d.mutP,shj:d.shj,shjP:d.shjP});
+  var d = data || {};
+  rows.push({
+    id:id,
+    operator: d.operator || '',
+    sheet: d.sheet || '',
+    date: d.date || today,
+    status: d.status || '',
+    mouza: d.mouza || '',
+    year: d.year || '',
+    rhz: d.rhz||0, rhzP: d.rhzP||0,
+    mut: d.mut||0, mutP: d.mutP||0,
+    shj: d.shj||0, shjP: d.shjP||0
+  });
   renderRows();
   updateSummary();
-  // Scroll to new entry
   setTimeout(function(){
     var el = document.getElementById('row-'+id);
     if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
@@ -323,7 +465,11 @@ function addRow(data){
 function duplicateLast(){
   if(rows.length === 0){ addRow(); return; }
   var last = rows[rows.length-1];
-  addRow({mouza:last.mouza,year:'',rhz:last.rhz,rhzP:0,mut:last.mut,mutP:0,shj:last.shj,shjP:0});
+  addRow({
+    operator:last.operator, sheet:last.sheet, date:last.date, status:last.status,
+    mouza:last.mouza, year:'',
+    rhz:last.rhz, rhzP:0, mut:last.mut, mutP:0, shj:last.shj, shjP:0
+  });
 }
 
 function removeRow(id){
@@ -337,15 +483,24 @@ function updateField(id, field, val){
   var r = rows.find(function(r){return r.id===id;});
   if(!r) return;
   r[field] = val;
-  // Update header tags
   var entryEl = document.getElementById('row-'+id);
   if(entryEl){
     var mTag = entryEl.querySelector('.entry-mouza-tag');
     var yTag = entryEl.querySelector('.entry-year-tag');
+    var oTag = entryEl.querySelector('.entry-op-tag');
     if(mTag) mTag.textContent = r.mouza || 'Mouza...';
     if(yTag) yTag.textContent = r.year || 'Year...';
+    if(oTag) oTag.textContent = r.operator ? ('👤 '+r.operator) : 'Operator...';
   }
   updateSummary();
+}
+
+function tehsilOptionsHtml(selected){
+  var html = '<option value="">-- Sheet chunen --</option>';
+  TEHSIL_OPTIONS.forEach(function(t){
+    html += '<option value="'+t+'"'+(t===selected?' selected':'')+'>'+t+'</option>';
+  });
+  return html;
 }
 
 function renderRows(){
@@ -358,9 +513,16 @@ function renderRows(){
     return '<div class="entry-row" id="row-'+r.id+'">'
       +'<div class="entry-header">'
         +'<div class="entry-num">'+(i+1)+'</div>'
-        +'<span class="entry-mouza-tag">'+(r.mouza||'Mouza...')+'</span>'
-        +'<span class="entry-year-tag">'+(r.year||'Year...')+'</span>'
+        +'<span class="entry-op-tag" style="font-size:12px;font-weight:500;color:var(--green-txt);background:var(--green-lt);padding:2px 10px;border-radius:20px">'+(r.operator?('👤 '+escHtml(r.operator)):'Operator...')+'</span>'
+        +'<span class="entry-mouza-tag">'+(r.mouza?escHtml(r.mouza):'Mouza...')+'</span>'
+        +'<span class="entry-year-tag">'+(r.year?escHtml(r.year):'Year...')+'</span>'
         +'<button class="btn btn-danger btn-sm btn-icon entry-del" onclick="removeRow('+r.id+')" title="Hatao">✕</button>'
+      +'</div>'
+      +'<div class="form-row col4" style="margin-bottom:10px">'
+        +'<div class="field"><label>Operator ka Naam *</label><input type="text" value="'+escHtml(r.operator)+'" oninput="updateField('+r.id+',\'operator\',this.value)" placeholder="Maslan: Ali Hassan"/></div>'
+        +'<div class="field"><label>Tehsil / Sheet *</label><select onchange="updateField('+r.id+',\'sheet\',this.value)">'+tehsilOptionsHtml(r.sheet)+'</select></div>'
+        +'<div class="field"><label>Date</label><input type="date" value="'+escHtml(r.date)+'" oninput="updateField('+r.id+',\'date\',this.value)"/></div>'
+        +'<div class="field"><label>Status</label><select onchange="updateField('+r.id+',\'status\',this.value)"><option value=""'+(r.status===''?' selected':'')+'>-- Select --</option><option value="Complete"'+(r.status==='Complete'?' selected':'')+'>Complete</option></select></div>'
       +'</div>'
       +'<div class="form-row col2" style="margin-bottom:10px">'
         +'<div class="field"><label>Mouza Naam *</label><input type="text" value="'+escHtml(r.mouza)+'" oninput="updateField('+r.id+',\'mouza\',this.value)" placeholder="مثلاً عالمدی سورہ"/></div>'
@@ -404,16 +566,22 @@ function updateSummary(){
   document.getElementById('cnt-shj').textContent = rows.reduce(function(s,r){return s+(+r.shj||0);},0);
   var pages = rows.reduce(function(s,r){return s+(+r.rhzP||0)+(+r.mutP||0)+(+r.shjP||0);},0);
   document.getElementById('cnt-pages').textContent = pages;
+
+  // header badge: agar saare entries ka operator same hai to dikhao, warna count dikhao
+  var ops = {};
+  rows.forEach(function(r){ if(r.operator) ops[r.operator] = true; });
+  var opKeys = Object.keys(ops);
+  var headerEl = document.getElementById('header-op');
+  if(opKeys.length === 1) headerEl.textContent = '👤 ' + opKeys[0];
+  else if(opKeys.length > 1) headerEl.textContent = '👥 ' + opKeys.length + ' operators';
+  else headerEl.textContent = '';
+
   updatePreview();
 }
 
 function updatePreview(){
-  var op = document.getElementById('operator-name').value.trim();
-  var sheet = document.getElementById('sheet-name').value;
-  var status = document.getElementById('status-global').value;
-  var date = document.getElementById('entry-date').value;
   var pc = document.getElementById('preview-card');
-  if(!op || !sheet || rows.length===0){pc.style.display='none';return;}
+  if(rows.length===0){pc.style.display='none';return;}
   pc.style.display='block';
   var tbody = document.getElementById('preview-body');
   tbody.innerHTML = rows.map(function(r,i){
@@ -431,27 +599,22 @@ function updatePreview(){
       +'<td style="text-align:center">'+(+r.shjP>0?r.shjP:'')+'</td>'
       +'<td style="text-align:center;font-weight:600;color:var(--green)">'+total+'</td>'
       +'<td style="text-align:center;font-weight:600;color:var(--green)">'+pages+'</td>'
-      +'<td><span style="background:var(--green-lt);color:var(--green-txt);padding:1px 8px;border-radius:20px;font-size:11px">'+escHtml(status)+'</span></td>'
-      +'<td style="color:var(--text-muted)">'+escHtml(date)+'</td>'
-      +'<td>'+escHtml(op)+'</td>'
+      +'<td><span style="background:var(--green-lt);color:var(--green-txt);padding:1px 8px;border-radius:20px;font-size:11px">'+escHtml(r.status)+'</span></td>'
+      +'<td style="color:var(--text-muted)">'+escHtml(r.date)+'</td>'
+      +'<td>'+escHtml(r.operator)+'</td>'
+      +'<td>'+escHtml(r.sheet)+'</td>'
     +'</tr>';
   }).join('');
 }
 
 function buildPayload(){
-  var op = document.getElementById('operator-name').value.trim();
-  var sheet = document.getElementById('sheet-name').value;
-  var status = document.getElementById('status-global').value;
-  var date = document.getElementById('entry-date').value;
-  if(!op) return {err:'Operator ka naam likhen'};
-  if(!sheet) return {err:'Tehsil/Sheet chunen'};
   if(rows.length===0) return {err:'Kam az kam ek entry daalein'};
-  var bad = rows.find(function(r){return !r.mouza||!r.year;});
-  if(bad) return {err:'Har entry mein Mouza naam aur Year zaroori hai'};
+  var bad = rows.find(function(r){return !r.mouza||!r.year||!r.operator||!r.sheet;});
+  if(bad) return {err:'Har entry mein Operator, Tehsil, Mouza naam aur Year zaroori hai'};
   return {ok:true, payload:{
-    operator:op, sheet:sheet, status:status, date:date,
     entries: rows.map(function(r){
       return {
+        operator:r.operator, sheet:r.sheet, status:r.status, date:r.date,
         mouza:r.mouza, year:r.year,
         rhz:+r.rhz||0, rhzPages:+r.rhzP||0,
         mutation:+r.mut||0, mutationPages:+r.mutP||0,
@@ -463,61 +626,89 @@ function buildPayload(){
   }};
 }
 
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxbuM-RrDB4IqguLO3NEwCsF2HyHxnGC7qpOfmdEZ9GvWlBlGPQS8TjO7146PCZ1d6l-w/exec';
+var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwMbE084NajNEYhdun_-l35R2_ErR6qDFQnoLD6GHBbXrFe--oVUNRwm6Wx1XC3K2wK8Q/exec';
+var BATCH_SIZE = 8; // chhota batch — GET URL length limit (~6-8KB) se safe rehne ke liye
+
+function jsonpRequest(payload){
+  return new Promise(function(resolve, reject){
+    var callbackName = 'gsCallback_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    var scriptEl = document.createElement('script');
+    var timer;
+
+    var cleanup = function(){
+      clearTimeout(timer);
+      if(scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+      delete window[callbackName];
+    };
+
+    timer = setTimeout(function(){
+      cleanup();
+      reject(new Error('Timeout — server se response nahi aaya'));
+    }, 20000);
+
+    window[callbackName] = function(response){
+      cleanup();
+      resolve(response);
+    };
+
+    scriptEl.onerror = function(){
+      cleanup();
+      reject(new Error('Request fail ho gayi'));
+    };
+
+    var encoded = encodeURIComponent(JSON.stringify(payload));
+    scriptEl.src = APPS_SCRIPT_URL + '?callback=' + callbackName + '&data=' + encoded;
+    document.body.appendChild(scriptEl);
+  });
+}
 
 async function submitData(){
-  var url = APPS_SCRIPT_URL;
   var v = buildPayload();
   if(v.err){showAlert('submit-alert',v.err,'err');return;}
   var btn = document.getElementById('submit-btn');
-  btn.innerHTML = '<span class="spinner"></span> Save ho raha hai...';
   btn.disabled = true;
 
-  // CORS bypass: jsonp-style via script tag
-  // Apps Script doGet mein callback parameter support hai
-  var callbackName = 'gsCallback_' + Date.now();
-  var scriptEl = document.createElement('script');
-  var timer;
+  var allEntries = v.payload.entries;
+  var batches = [];
+  for(var i = 0; i < allEntries.length; i += BATCH_SIZE){
+    batches.push(allEntries.slice(i, i + BATCH_SIZE));
+  }
 
-  var cleanup = function(){
-    clearTimeout(timer);
-    if(scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
-    delete window[callbackName];
-  };
+  var totalSaved = 0;
+  var errors = [];
 
-  timer = setTimeout(function(){
-    cleanup();
-    // Timeout ke baad assume karo save ho gaya — Apps Script redirect karta hai
-    showAlert('submit-alert','✅ Data bhej diya gaya — sheet check karen. ('+v.payload.entries.length+' entries, '+v.payload.operator+')','ok');
-    btn.innerHTML='✅ Saved!';
-    setTimeout(function(){btn.innerHTML='⬆ Sheet mein Save karen';btn.disabled=false;},3000);
-  }, 8000);
+  for(var b = 0; b < batches.length; b++){
+    btn.innerHTML = '<span class="spinner"></span> Save ho raha hai... ('+(b+1)+'/'+batches.length+' batch)';
+    showAlert('submit-alert', 'Batch '+(b+1)+' of '+batches.length+' bheja ja raha hai... ('+totalSaved+'/'+allEntries.length+' ab tak save)', 'info');
 
-  window[callbackName] = function(response){
-    cleanup();
-    if(response && response.ok){
-      showAlert('submit-alert','✅ '+response.saved+' entries save ho gayin — '+v.payload.operator+' — '+v.payload.sheet,'ok');
-      btn.innerHTML='✅ Saved!';
-      setTimeout(function(){btn.innerHTML='⬆ Sheet mein Save karen';btn.disabled=false;},3000);
-    } else {
-      showAlert('submit-alert','Error: '+(response&&response.error||'Unknown error'),'err');
-      btn.innerHTML='⬆ Sheet mein Save karen';btn.disabled=false;
+    try {
+      var resp = await jsonpRequest({ entries: batches[b] });
+      if(resp && resp.ok){
+        totalSaved += resp.saved || batches[b].length;
+      } else {
+        errors.push('Batch '+(b+1)+': '+(resp && resp.error || 'Unknown error'));
+      }
+    } catch(err){
+      errors.push('Batch '+(b+1)+': '+err.message);
     }
-  };
+    // Thoda gap rakho taake Apps Script overload na ho
+    await new Promise(function(r){ setTimeout(r, 300); });
+  }
 
-  var encoded = encodeURIComponent(JSON.stringify(v.payload));
-  scriptEl.src = url + '?callback=' + callbackName + '&data=' + encoded;
-  document.body.appendChild(scriptEl);
+  btn.disabled = false;
+  if(errors.length === 0){
+    btn.innerHTML = '✅ Saved!';
+    showAlert('submit-alert', '✅ '+totalSaved+' entries successfully save ho gayin', 'ok');
+    setTimeout(function(){btn.innerHTML='⬆ Sheet mein Save karen';}, 3000);
+  } else {
+    btn.innerHTML = '⬆ Sheet mein Save karen';
+    showAlert('submit-alert', '⚠️ '+totalSaved+' entries save hui, lekin masla aaya: '+errors.join(' | '), 'err');
+  }
 }
 
-
-
 function clearAll(){
-  if(rows.length>0 && !confirm('Sab entries aur operator info clear karen?')) return;
+  if(rows.length>0 && !confirm('Sab entries clear karen?')) return;
   rows=[];rowId=0;
-  document.getElementById('operator-name').value='';
-  document.getElementById('sheet-name').value='';
-  document.getElementById('entry-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('header-op').textContent='';
   renderRows();updateSummary();
   document.getElementById('submit-alert').style.display='none';
@@ -529,7 +720,7 @@ function exportJSON(){
   var blob = new Blob([JSON.stringify(v.payload,null,2)],{type:'application/json'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'mouza_entry_'+v.payload.operator.replace(/\s+/g,'_')+'_'+v.payload.date+'.json';
+  a.download = 'mouza_entries_'+today+'.json';
   a.click();
 }
 
@@ -540,8 +731,6 @@ function showAlert(id, msg, type){
   el.style.display = 'block';
 }
 
-
-
 // Initial render
 renderRows();
 
@@ -550,7 +739,6 @@ renderRows();
   var badge = document.getElementById('conn-badge');
   try{
     var res = await fetch(APPS_SCRIPT_URL+'?action=ping', {mode:'no-cors'});
-    // no-cors mein response opaque hoti hai — agar yahan tak pohoncha matlab server up hai
     badge.textContent = '✅ Connected';
     badge.style.background = 'rgba(255,255,255,.25)';
   }catch(e){
